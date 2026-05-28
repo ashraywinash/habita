@@ -12,11 +12,24 @@ export default function UserDashboard() {
   }, []);
 
   const fetchTasks = async () => {
-    const { data } = await supabase.from('tasks').select('*').order('deadline', { ascending: true });
+    // Get start of today
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const { data } = await supabase
+      .from('tasks')
+      .select('*')
+      // Only show tasks that are pending OR were completed/failed TODAY
+      .or(`status.eq.pending,completed_at.gte.${startOfToday.toISOString()}`) 
+      .order('deadline', { ascending: true });
+      
     if (data) {
       setTasks(data);
-      const totalPoints = data.reduce((acc, task) => acc + (task.net_points || 0), 0);
-      setBalance(totalPoints);
+      // Balance naturally calculates only for today's tasks
+      const todaysPoints = data
+        .filter(t => t.status !== 'pending')
+        .reduce((acc, task) => acc + (task.net_points || 0), 0);
+      setBalance(todaysPoints);
     }
   };
 
