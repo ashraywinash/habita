@@ -1,65 +1,92 @@
-import Image from "next/image";
+'use client';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/utils/supabase';
+import { differenceInMinutes } from 'date-fns';
 
-export default function Home() {
+export default function UserDashboard() {
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [balance, setBalance] = useState(0);
+
+  useEffect(() => {
+    fetchTasks();
+  }, []);
+
+  const fetchTasks = async () => {
+    const { data } = await supabase.from('tasks').select('*').order('deadline', { ascending: true });
+    if (data) {
+      setTasks(data);
+      const totalPoints = data.reduce((acc, task) => acc + (task.net_points || 0), 0);
+      setBalance(totalPoints);
+    }
+  };
+
+  const markComplete = async (task: any) => {
+    const now = new Date();
+    const deadline = new Date(task.deadline);
+    const minutesLate = differenceInMinutes(now, deadline);
+    
+    let netPoints = 0;
+    
+    if (minutesLate <= 0) {
+      netPoints = task.reward_amount; // On time!
+    } else {
+      const rawPenalty = minutesLate * task.penalty_rate;
+      netPoints = -Math.min(rawPenalty, task.max_penalty); // Late - Apply capped penalty
+    }
+
+    await supabase
+      .from('tasks')
+      .update({ status: 'completed', completed_at: now.toISOString(), net_points: netPoints })
+      .eq('id', task.id);
+
+    fetchTasks(); // Refresh data
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen bg-gray-950 text-white p-6 md:p-12 font-sans">
+      <div className="max-w-3xl mx-auto">
+        <header className="flex justify-between items-end mb-10 border-b border-gray-800 pb-6">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Your Tasks</h1>
+            <p className="text-gray-400 mt-1">Complete before the deadline to earn.</p>
+          </div>
+          <div className="text-right">
+            <p className="text-sm text-gray-400 uppercase tracking-wider">Net Balance</p>
+            <p className={`text-4xl font-bold ${balance >= 0 ? 'text-green-400' : 'text-red-500'}`}>
+              ₹{balance}
+            </p>
+          </div>
+        </header>
+
+        <div className="space-y-4">
+          {tasks.filter(t => t.status === 'pending').map((task) => (
+            <div key={task.id} className="bg-gray-900 border border-gray-800 rounded-xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center hover:border-gray-700 transition-colors">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <h3 className="text-xl font-semibold">{task.title}</h3>
+                  <span className="px-2 py-1 text-xs rounded-full bg-blue-900/30 text-blue-400 border border-blue-800">
+                    {task.priority.replace(/_/g, ' ').toUpperCase()}
+                  </span>
+                </div>
+                <p className="text-gray-400 text-sm">
+                  Deadline: {new Date(task.deadline).toLocaleString()}
+                </p>
+              </div>
+              
+              <button 
+                onClick={() => markComplete(task)}
+                className="mt-4 md:mt-0 bg-green-600/10 hover:bg-green-600/20 text-green-500 border border-green-800/50 px-6 py-2 rounded-lg font-medium transition-all"
+              >
+                Mark Complete
+              </button>
+            </div>
+          ))}
+          
+          {tasks.filter(t => t.status === 'pending').length === 0 && (
+            <div className="text-center text-gray-500 py-10">No pending tasks. You're all caught up!</div>
+          )}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }
