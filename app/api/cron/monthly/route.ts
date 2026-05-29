@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   // Send Email
   await resend.emails.send({
     from: 'onboarding@resend.dev',
-    to: 'finance_admin@example.com', // REPLACE WITH YOUR ADMIN'S EMAIL
+    to: ['ashuabc15@gmail.com', 'workwithutkarsh22@gmail.com'], // REPLACE WITH YOUR ADMIN'S EMAIL
     subject: `Monthly Consolidated Receipt: ${action} ₹${Math.abs(monthlyBalance)}`,
     html: `
       <h2>Monthly Accountability Receipt</h2>

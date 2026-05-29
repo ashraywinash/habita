@@ -1,65 +1,71 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/utils/supabase';
+import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+const resend = new Resend(process.env.RESEND_API_KEY!);
 
 export async function GET(request: Request) {
-  // Security check: ensure the request comes from Vercel Cron
-  const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return new NextResponse('Unauthorized', { status: 401 });
-  }
+  // Optional: Add security here so only Vercel can trigger this route
+  // if (request.headers.get('Authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+  //   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // }
 
-  const now = new Date();
+  const now = new Date().toISOString();
 
-  // 1. Find all pending tasks whose deadline has passed
-  const { data: missedTasks } = await supabase
+  // 1. FIND UNFINISHED TASKS PAST THEIR DEADLINE
+  const { data: overdueTasks, error: fetchError } = await supabase
     .from('tasks')
     .select('*')
     .eq('status', 'pending')
-    .lte('deadline', now.toISOString());
+    .lt('deadline', now);
 
-  // 2. Mark them as failed and apply MAX penalty
-  if (missedTasks && missedTasks.length > 0) {
-    for (const task of missedTasks) {
+  if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 });
+
+  // 2. LEVY PENALTIES (Mark as failed, apply max penalty)
+  let totalPenaltyDeducted = 0;
+
+  if (overdueTasks && overdueTasks.length > 0) {
+    for (const task of overdueTasks) {
+      const penalty = -Math.abs(task.max_penalty); // Ensure it's a negative number
+      totalPenaltyDeducted += penalty;
+
       await supabase
         .from('tasks')
         .update({ 
           status: 'failed', 
-          net_points: -task.max_penalty,
-          completed_at: now.toISOString() // Record when it failed
+          net_points: penalty,
+          completed_at: now 
         })
         .eq('id', task.id);
     }
   }
 
-  // 3. Calculate today's net balance
-  // Start of today to end of today
-  const startOfDay = new Date(now.setHours(0, 0, 0, 0)).toISOString();
-  const endOfDay = new Date(now.setHours(23, 59, 59, 999)).toISOString();
+  // 3. CALCULATE DAILY BALANCE (Sum of all completed/failed tasks for today)
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
 
-  const { data: todaysTasks } = await supabase
+  const { data: todaysResolvedTasks } = await supabase
     .from('tasks')
-    .select('net_points')
-    .neq('status', 'pending') // Get completed and failed tasks
-    .gte('completed_at', startOfDay)
-    .lte('completed_at', endOfDay);
+    .select('net_points, status')
+    .gte('completed_at', startOfDay.toISOString());
 
-  const dailyBalance = todaysTasks?.reduce((acc, task) => acc + task.net_points, 0) || 0;
+  const dailyBalance = todaysResolvedTasks?.reduce((sum, task) => sum + (task.net_points || 0), 0) || 0;
+  const missedCount = overdueTasks?.length || 0;
 
-  // 4. Send Email to Finance Admin
+  // 4. SEND THE EMAIL
   await resend.emails.send({
-    from: 'onboarding@resend.dev', // Default testing email for Resend
-    to: 'ashuabc15@gmail.com', // REPLACE WITH YOUR ADMIN'S EMAIL
+    from: 'onboarding@resend.dev',
+    to: ['ashuabc15@gmail.com', 'workwithutkarsh22@gmail.com'], 
     subject: `Daily Habit Report: Net ${dailyBalance >= 0 ? 'Gain' : 'Loss'} of ₹${Math.abs(dailyBalance)}`,
     html: `
       <h2>Daily Accountability Report</h2>
       <p>Today's net point balance is: <strong>₹${dailyBalance}</strong></p>
-      <p>Tasks failed today: ${missedTasks?.length || 0}</p>
-      <p><em>The daily points meter has now reset.</em></p>
+      <p>Tasks failed/ignored today: <strong>${missedCount}</strong> (Penalty of ₹${Math.abs(totalPenaltyDeducted)} automatically applied)</p>
+      <hr />
+      <p><em>The daily points meter has now reset. See you tomorrow.</em></p>
     `,
   });
 
-  return NextResponse.json({ success: true, dailyBalance, missedTasks: missedTasks?.length });
+  return NextResponse.json({ success: true, penalised: missedCount, balance: dailyBalance });
 }
